@@ -51,7 +51,7 @@
 
         href="https://github.com/feross/simple-peer#readme"
 
-    >simple-peer (v7.0.0)</a>
+    >simple-peer (v8.1.0)</a>
 </h1>
 <h4>Simple one-to-one WebRTC video/voice and data channels</h4>
 <div class="apidocSectionDiv"><a
@@ -64,6 +64,15 @@
         <li>
 
             <span class="apidocSignatureSpan">boolean <span class="apidocSignatureSpan">simple-peer.</span>WEBRTC_SUPPORT</span>
+
+        </li>
+
+        <li>
+
+            <a class="apidocElementLiA" href="#apidoc.element.simple-peer.simple-peer">
+            function <span class="apidocSignatureSpan"></span>simple-peer
+            <span class="apidocSignatureSpan">(opts)</span>
+            </a>
 
         </li>
 
@@ -553,6 +562,151 @@
 
 
     <h2>
+        <a href="#apidoc.element.simple-peer.simple-peer" id="apidoc.element.simple-peer.simple-peer">
+        function <span class="apidocSignatureSpan"></span>simple-peer
+        <span class="apidocSignatureSpan">(opts)</span>
+        </a>
+    </h2>
+    <ul>
+    <li>description and source-code<pre class="apidocCodePre">function Peer(opts) {
+  var self = this
+  if (!(self instanceof Peer)) return new Peer(opts)
+
+  self._id = randombytes(4).toString(&#x27;hex&#x27;).slice(0, 7)
+  self._debug(&#x27;new peer %o&#x27;, opts)
+
+  opts = Object.assign({
+    allowHalfOpen: false
+  }, opts)
+
+  stream.Duplex.call(self, opts)
+
+  self.channelName = opts.initiator
+    ? opts.channelName || randombytes(20).toString(&#x27;hex&#x27;)
+    : null
+
+  // Needed by _transformConstraints, so set this early
+  self._isChromium = typeof window !== &#x27;undefined&#x27; &#x26;&#x26; !!window.webkitRTCPeerConnection
+
+  self.initiator = opts.initiator || false
+  self.channelConfig = opts.channelConfig || Peer.channelConfig
+  self.config = opts.config || Peer.config
+  self.constraints = self._transformConstraints(opts.constraints || Peer.constraints)
+  self.offerConstraints = self._transformConstraints(opts.offerConstraints || {})
+  self.answerConstraints = self._transformConstraints(opts.answerConstraints || {})
+  self.reconnectTimer = opts.reconnectTimer || false
+  self.sdpTransform = opts.sdpTransform || function (sdp) { return sdp }
+  self.stream = opts.stream || false
+  self.trickle = opts.trickle !== undefined ? opts.trickle : true
+
+  self.destroyed = false
+  self.connected = false
+
+  self.remoteAddress = undefined
+  self.remoteFamily = undefined
+  self.remotePort = undefined
+  self.localAddress = undefined
+  self.localPort = undefined
+
+  self._wrtc = (opts.wrtc &#x26;&#x26; typeof opts.wrtc === &#x27;object&#x27;)
+    ? opts.wrtc
+    : getBrowserRTC()
+
+  if (!self._wrtc) {
+    if (typeof window === &#x27;undefined&#x27;) {
+      throw new Error(&#x27;No WebRTC support: Specify `opts.wrtc` option in this environment&#x27;)
+    } else {
+      throw new Error(&#x27;No WebRTC support: Not a supported browser&#x27;)
+    }
+  }
+
+  self._pcReady = false
+  self._channelReady = false
+  self._iceComplete = false // ice candidate trickle done (got null candidate)
+  self._channel = null
+  self._pendingCandidates = []
+  self._previousStreams = []
+
+  self._chunk = null
+  self._cb = null
+  self._interval = null
+  self._reconnectTimeout = null
+
+  self._pc = new (self._wrtc.RTCPeerConnection)(self.config, self.constraints)
+
+  // We prefer feature detection whenever possible, but sometimes that&#x27;s not
+  // possible for certain implementations.
+  self._isWrtc = Array.isArray(self._pc.RTCIceConnectionStates)
+  self._isReactNativeWebrtc = typeof self._pc._peerConnectionId === &#x27;number&#x27;
+
+  self._pc.oniceconnectionstatechange = function () {
+    self._onIceStateChange()
+  }
+  self._pc.onicegatheringstatechange = function () {
+    self._onIceStateChange()
+  }
+  self._pc.onsignalingstatechange = function () {
+    self._onSignalingStateChange()
+  }
+  self._pc.onicecandidate = function (event) {
+    self._onIceCandidate(event)
+  }
+
+  // Other spec events, unused by this implementation:
+  // - onconnectionstatechange
+  // - onicecandidateerror
+  // - onfingerprintfailure
+
+  if (self.initiator) {
+    var createdOffer = false
+    self._pc.onnegotiationneeded = function () {
+      if (!createdOffer) self._createOffer()
+      createdOffer = true
+    }
+
+    self._setupData({
+      channel: self._pc.createDataChannel(self.channelName, self.channelConfig)
+    })
+  } else {
+    self._pc.ondatachannel = function (event) {
+      self._setupData(event)
+    }
+  }
+
+  if (&#x27;addTrack&#x27; in self._pc) {
+    // WebRTC Spec, Firefox
+    if (self.stream) {
+      self.stream.getTracks().forEach(function (track) {
+        self._pc.addTrack(track, self.stream)
+      })
+    }
+    self._pc.ontrack = function (event) {
+      self._onTrack(event)
+    }
+  } else {
+    // Chrome, etc. This can be removed once all browsers support `ontrack`
+    if (self.stream) self._pc.addStream(self.stream)
+    self._pc.onaddstream = function (event) {
+      self._onAddStream(event)
+    }
+  }
+
+  // HACK: wrtc doesn&#x27;t fire the &#x27;negotionneeded&#x27; event
+  if (self.initiator &#x26;&#x26; self._isWrtc) {
+    self._pc.onnegotiationneeded()
+  }
+
+  self._onFinishBound = function () {
+    self._onFinish()
+  }
+  self.once(&#x27;finish&#x27;, self._onFinishBound)
+}</pre></li>
+    <li>example usage<pre class="apidocCodePre">n/a</pre></li>
+    </ul>
+
+
+
+    <h2>
         <a href="#apidoc.element.simple-peer.super_" id="apidoc.element.simple-peer.super_">
         function <span class="apidocSignatureSpan">simple-peer.</span>super_
         <span class="apidocSignatureSpan">(options)</span>
@@ -722,7 +876,7 @@
     <li>example usage<pre class="apidocCodePre">...
 if (onclose) self.once(&#x27;close&#x27;, onclose)
 
-self._debug(&#x27;destroy (error: %s)&#x27;, err &#x26;&#x26; err.message)
+self._debug(&#x27;destroy (error: %s)&#x27;, err &#x26;&#x26; (err.message || err))
 
 self.readable = self.writable = false
 
@@ -1314,7 +1468,7 @@ self._pendingCandidates.forEach(function (candidate) {
     <li>example usage<pre class="apidocCodePre">...
 if (onclose) self.once(&#x27;close&#x27;, onclose)
 
-self._debug(&#x27;destroy (error: %s)&#x27;, err &#x26;&#x26; err.message)
+self._debug(&#x27;destroy (error: %s)&#x27;, err &#x26;&#x26; (err.message || err))
 
 self.readable = self.writable = false
 
@@ -1341,7 +1495,23 @@ self._previousStreams = null
     <li>description and source-code<pre class="apidocCodePre">pipe = function () {
   this.emit(&#x27;error&#x27;, new Error(&#x27;Cannot pipe, not readable&#x27;));
 }</pre></li>
-    <li>example usage<pre class="apidocCodePre">n/a</pre></li>
+    <li>example usage<pre class="apidocCodePre">...
+t.plan(9)
+
+var peer1 = new Peer({ config: config, initiator: true, wrtc: common.wrtc })
+var peer2 = new Peer({ config: config, wrtc: common.wrtc })
+peer1.on(&#x27;signal&#x27;, function (data) { if (!peer2.destroyed) peer2.signal(data) })
+peer2.on(&#x27;signal&#x27;, function (data) { if (!peer1.destroyed) peer1.signal(data) })
+
+str(&#x27;abc&#x27;).<span class="apidocCodeKeywordSpan">pipe</span>(peer1)
+
+peer1.on(&#x27;data&#x27;, function () {
+  t.fail(&#x27;peer1 should not get data&#x27;)
+})
+peer1.on(&#x27;finish&#x27;, function () {
+  t.pass(&#x27;got peer1 &#x22;finish&#x22;&#x27;)
+  t.ok(peer1._writableState.finished)
+...</pre></li>
     </ul>
 
 
@@ -1715,7 +1885,23 @@ document.querySelector(&#x27;form&#x27;).addEventListener(&#x27;submit&#x27;, fu
 
   return dest;
 }</pre></li>
-    <li>example usage<pre class="apidocCodePre">n/a</pre></li>
+    <li>example usage<pre class="apidocCodePre">...
+t.plan(9)
+
+var peer1 = new Peer({ config: config, initiator: true, wrtc: common.wrtc })
+var peer2 = new Peer({ config: config, wrtc: common.wrtc })
+peer1.on(&#x27;signal&#x27;, function (data) { if (!peer2.destroyed) peer2.signal(data) })
+peer2.on(&#x27;signal&#x27;, function (data) { if (!peer1.destroyed) peer1.signal(data) })
+
+str(&#x27;abc&#x27;).<span class="apidocCodeKeywordSpan">pipe</span>(peer1)
+
+peer1.on(&#x27;data&#x27;, function () {
+  t.fail(&#x27;peer1 should not get data&#x27;)
+})
+peer1.on(&#x27;finish&#x27;, function () {
+  t.pass(&#x27;got peer1 &#x22;finish&#x22;&#x27;)
+  t.ok(peer1._writableState.finished)
+...</pre></li>
     </ul>
 
 
@@ -2037,10 +2223,9 @@ self._pendingCandidates.forEach(function (candidate) {
   }
 
   // proxy certain important events.
-  var events = [&#x27;error&#x27;, &#x27;close&#x27;, &#x27;destroy&#x27;, &#x27;pause&#x27;, &#x27;resume&#x27;];
-  forEach(events, function (ev) {
-    stream.on(ev, self.emit.bind(self, ev));
-  });
+  for (var n = 0; n &#x3c; kProxyEvents.length; n++) {
+    stream.on(kProxyEvents[n], self.emit.bind(self, kProxyEvents[n]));
+  }
 
   // when we try to consume some more bytes, simply unpause the
   // underlying stream.
